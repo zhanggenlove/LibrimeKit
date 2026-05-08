@@ -1,0 +1,15 @@
+.DS_Store
+/.build
+/Packages
+/*.xcodeproj
+xcuserdata/
+DerivedData/
+.swiftpm/config/registries.json
+.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+.netrc
+
+# Local-only binary scratch — release artifacts live on
+# GitHub Releases and are referenced from Package.swift via
+# `binaryTarget(url:checksum:)`.
+/Frameworks
+/Frameworks.backup-*
