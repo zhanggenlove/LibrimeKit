@@ -6,6 +6,35 @@
 // to pick up those declarations as backward-compat shims.
 #import "rime_api_deprecated.h"
 #import "rime_levers_api.h"
+#import <stdlib.h>
+#import <string.h>
+
+// --- librime plugin module force-link ------------------------------
+//
+// librime's static build only force-links the *default* modules
+// (core / dict / gears / levers) via `rime_declare_module_dependencies`.
+// Plugin modules like **lua** are NOT referenced anywhere, so the
+// linker dead-strips their object files — which also drops the
+// `RIME_REGISTER_MODULE(lua)` static initializer, so the module is
+// never even registered in librime's ModuleManager. Result: every
+// `lua_translator@…` / `lua_filter@…` component silently fails to
+// instantiate (date/time `sj`/`rq`, 农历, 计算器, 错音错字 … all dead),
+// while pinyin keeps working because that's core/dict/gears.
+//
+// The actual `rime_require_module_lua` reference lives in
+// `lrk_force_modules.mm` because librime declares it with C++
+// linkage (mangled symbol), which a plain `.m` translation unit
+// can't name. We call the C-linkage wrapper from a constructor here
+// so the linker keeps THIS object (LRKAPI is always used), which in
+// turn keeps the wrapper, which keeps the lua module object — so its
+// `RIME_REGISTER_MODULE(lua)` static initializer runs. The module
+// still only *loads* when "lua" appears in `RimeTraits.modules` (see
+// `-rimeTraits:` below + the Swift caller passing `["default", "lua"]`).
+extern void lrk_force_link_plugin_modules(void);
+__attribute__((constructor))
+static void lrk_force_link_modules_ctor(void) {
+  lrk_force_link_plugin_modules();
+}
 
 static id<LRKNotificationDelegate> notificationDelegate = nil;
 
@@ -93,6 +122,25 @@ static void rimeNotificationHandler(void *contextObject,
   }
   if (stagingDir != nil) {
     traits -> staging_dir = [stagingDir UTF8String];
+  }
+  // Forward the module list into the C struct. Previously this was
+  // dropped entirely, so `RimeTraits.modules` was always NULL and
+  // librime fell back to its default set (core/dict/gears/levers) —
+  // plugin modules like "lua" never loaded. Callers pass
+  // `["default", "lua"]` to keep the defaults AND enable lua.
+  //
+  // librime reads `modules` during `RimeStartMaintenance` /
+  // `RimeInitialize` (after this call returns), so the C array must
+  // outlive `-setup:`. We intentionally leak this small, one-time
+  // allocation rather than risk a use-after-free.
+  if (modules != nil && modules.count > 0) {
+    const char **cModules =
+        (const char **)malloc(sizeof(char *) * (modules.count + 1));
+    for (NSUInteger i = 0; i < modules.count; i++) {
+      cModules[i] = strdup([modules[i] UTF8String]);
+    }
+    cModules[modules.count] = NULL;
+    traits -> modules = cModules;
   }
 }
 
